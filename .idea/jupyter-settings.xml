@@ -1,0 +1,49 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project version="4">
+  <component name="JupyterPersistentConnectionParameters">
+    <option name="knownRemoteServers">
+      <list>
+        <JupyterConnectionParameters>
+          <option name="authType" value="notebook" />
+          <option name="token" value="5eee8a4f5dcf2c76f983716cb57edfa856067360f35576cf" />
+          <option name="urlString" value="http://127.0.0.1:8889" />
+          <authParams2>
+            <map>
+              <entry key="token" value="5eee8a4f5dcf2c76f983716cb57edfa856067360f35576cf" />
+            </map>
+          </authParams2>
+        </JupyterConnectionParameters>
+        <JupyterConnectionParameters>
+          <option name="authType" value="notebook" />
+          <option name="token" value="5eee8a4f5dcf2c76f983716cb57edfa856067360f35576cf" />
+          <option name="urlString" value="http://localhost:8889" />
+          <authParams2>
+            <map>
+              <entry key="token" value="5eee8a4f5dcf2c76f983716cb57edfa856067360f35576cf" />
+            </map>
+          </authParams2>
+        </JupyterConnectionParameters>
+      </list>
+    </option>
+    <option name="moduleParameters">
+      <map>
+        <entry key="$PROJECT_DIR$/../../NFPyramid/.idea/NFPyramid.iml">
+          <value>
+            <JupyterConnectionParameters>
+              <option name="managed" value="true" />
+              <option name="port" value="8889" />
+            </JupyterConnectionParameters>
+          </value>
+        </entry>
+        <entry key="$PROJECT_DIR$/../../pytorch_objectdetecttrack/.idea/pytorch_objectdetecttrack.iml">
+          <value>
+            <JupyterConnectionParameters>
+              <option name="managed" value="true" />
+              <option name="sdkHomePath" value="$USER_HOME$/miniconda3/envs/pytorch3/bin/python" />
+            </JupyterConnectionParameters>
+          </value>
+        </entry>
+      </map>
+    </option>
+  </component>
+</project>
