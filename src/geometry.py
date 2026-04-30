@@ -1,3 +1,4 @@
+import torch
 from jaxtyping import Float
 from torch import Tensor
 
@@ -7,7 +8,7 @@ def homogenize_points(
 ) -> Float[Tensor, "*batch dim+1"]:
     """Turn n-dimensional points into (n+1)-dimensional homogeneous points."""
 
-    raise NotImplementedError("This is your homework.")
+    return torch.cat([points, torch.ones_like(points[..., :1])], dim=-1)
 
 
 def homogenize_vectors(
@@ -15,7 +16,7 @@ def homogenize_vectors(
 ) -> Float[Tensor, "*batch dim+1"]:
     """Turn n-dimensional vectors into (n+1)-dimensional homogeneous vectors."""
 
-    raise NotImplementedError("This is your homework.")
+    return torch.cat([points, torch.zeros_like(points[..., :1])], dim=-1)
 
 
 def transform_rigid(
@@ -24,7 +25,7 @@ def transform_rigid(
 ) -> Float[Tensor, "*batch 4"]:
     """Apply a rigid-body transform to homogeneous points or vectors."""
 
-    raise NotImplementedError("This is your homework.")
+    return (transform @ xyz.unsqueeze(-1)).squeeze(-1)
 
 
 def transform_world2cam(
@@ -35,7 +36,7 @@ def transform_world2cam(
     3D camera coordinates.
     """
 
-    raise NotImplementedError("This is your homework.")
+    return transform_rigid(xyz, torch.linalg.inv(cam2world))
 
 
 def transform_cam2world(
@@ -46,7 +47,7 @@ def transform_cam2world(
     3D world coordinates.
     """
 
-    raise NotImplementedError("This is your homework.")
+    return transform_rigid(xyz, cam2world)
 
 
 def project(
@@ -55,4 +56,12 @@ def project(
 ) -> Float[Tensor, "*batch 2"]:
     """Project homogenized 3D points in camera coordinates to pixel coordinates."""
 
-    raise NotImplementedError("This is your homework.")
+    # Perspective divide: normalize by z
+    z = xyz[..., 2:3]
+    xy_norm = xyz[..., :2] / z
+    ones = torch.ones_like(xy_norm[..., :1])
+    xy_h = torch.cat([xy_norm, ones], dim=-1)  # (*batch, 3)
+
+    # Apply normalized intrinsics → result is in [0, 1] pixel space
+    uv = (intrinsics @ xy_h.unsqueeze(-1)).squeeze(-1)  # (*batch, 3)
+    return uv[..., :2]
