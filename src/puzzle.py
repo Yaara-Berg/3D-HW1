@@ -23,7 +23,8 @@ def load_dataset(path: Path) -> PuzzleDataset:
     intrinsics = torch.tensor(metadata["intrinsics"], dtype=torch.float32)
 
     # Load grayscale images if present (some distributed puzzle copies only ship metadata).
-    image_paths = sorted(list(path.glob("*.png")) + list(path.glob("*.jpg")) + list(path.glob("*.jpeg")))
+    image_root = path / "images"
+    image_paths = sorted(list(image_root.glob("*.png")) + list(image_root.glob("*.jpg")) + list(image_root.glob("*.jpeg")))
     if image_paths:
         images = []
         for image_path in image_paths:
@@ -31,7 +32,7 @@ def load_dataset(path: Path) -> PuzzleDataset:
             images.append(torch.tensor(list(image.getdata()), dtype=torch.float32).reshape(image.height, image.width) / 255.0)
         stacked_images = torch.stack(images, dim=0)
     else:
-        stacked_images = torch.empty((0, 0, 0), dtype=torch.float32)
+        raise ValueError("No images found in the dataset.")
 
     return {
         "extrinsics": extrinsics,
