@@ -7,6 +7,7 @@ import numpy as np
 from PIL import Image
 import cv2
 import matplotlib.pyplot as plt
+import scipy.ndimage
 
 
 def get_3D_object_points(chessboard_size: tuple) -> np.ndarray:
@@ -17,8 +18,60 @@ def get_3D_object_points(chessboard_size: tuple) -> np.ndarray:
     Returns:
         Numpy array containing the 3D object points
     """
-    # TODO: Implement this method!
-    raise NotImplementedError
+    columns, rows = chessboard_size
+    object_points = np.zeros((columns * rows, 3), dtype=np.float32)
+    object_points[:, :2] = np.mgrid[0:columns, 0:rows].T.reshape(-1, 2)
+    return object_points
+
+def _pixel_to_normalized_coordinates(u: np.ndarray, v: np.ndarray, camera_matrix: np.ndarray
+                                     ) -> tuple[np.ndarray, np.ndarray]:
+    """
+    Convert image pixel coordinates to normalized camera coordinates
+    Args:
+        u: Numpy array containing the image pixel coordinates
+        v: Numpy array containing the image pixel coordinates
+        camera_matrix: Numpy array containing the camera matrix
+    Returns:
+        Tuple containing the camera pixel coordinates
+    """
+    x = (u - camera_matrix[0, 2]) / camera_matrix[0, 0]
+    y = (v - camera_matrix[1, 2]) / camera_matrix[1, 1]
+    return x, y
+
+
+def _normalized_coordinates_to_pixel(x: np.ndarray, y: np.ndarray, camera_matrix: np.ndarray
+                                     ) -> tuple[np.ndarray, np.ndarray]:
+    """
+    Convert normalized camera coordinates to image pixel coordinates
+    Args:
+        x: Numpy array containing the camera pixel coordinates
+        y: Numpy array containing the camera pixel coordinates
+        camera_matrix: Numpy array containing the camera matrix
+    Returns:
+        Tuple containing the image pixel coordinates
+    """
+    u = x * camera_matrix[0, 0] + camera_matrix[0, 2]
+    v = y * camera_matrix[1, 1] + camera_matrix[1, 2]
+    return u, v
+
+
+def _apply_distortion_to_normalized_coordinates(x: np.ndarray, y: np.ndarray, dist_coeffs: np.ndarray
+                                                ) -> tuple[np.ndarray, np.ndarray]:
+    """
+    Apply distortion to normalized camera coordinates
+    Args:
+        x: Numpy array containing the normalized camera coordinates
+        y: Numpy array containing the normalized camera coordinates
+        dist_coeffs: Numpy array containing the distortion coefficients
+    Returns:
+        Tuple containing the distorted normalized camera coordinates
+    """
+    k1, k2, p1, p2, k3 = dist_coeffs[0]
+    r2 = x**2 + y**2
+    radial = 1 + k1*r2 + k2*r2**2 + k3*r2**3
+    x_distorted = x * radial + 2*p1*x*y + p2*(r2 + 2*x**2)
+    y_distorted = y * radial + 2*p2*x*y + p1*(r2 + 2*y**2)
+    return x_distorted, y_distorted
 
 
 def undistort_image(image: np.ndarray, 
@@ -35,7 +88,25 @@ def undistort_image(image: np.ndarray,
     """
     # TODO: Implement this method!
     # HINT: use scipy.ndimage.map_coordinates to remap the image
-    raise NotImplementedError
+    image_height, image_width = image.shape[:2]
+    u_grid, v_grid = np.meshgrid(np.arange(image_width), np.arange(image_height))
+    x_normalized, y_normalized = _pixel_to_normalized_coordinates(u_grid, v_grid, camera_matrix)
+    x_distorted, y_distorted = _apply_distortion_to_normalized_coordinates(
+        x_normalized, y_normalized, dist_coeffs
+    )
+    u_distorted, v_distorted = _normalized_coordinates_to_pixel(
+        x_distorted, y_distorted, camera_matrix
+    )
+
+    source_coordinates = [v_distorted.flatten(), u_distorted.flatten()]
+    undistorted_image = np.zeros_like(image)
+    for channel_index in range(image.shape[2]):
+        undistorted_channel = scipy.ndimage.map_coordinates(
+            image[:, :, channel_index], source_coordinates, order=1
+        ).reshape(image_height, image_width)
+        undistorted_image[:, :, channel_index] = undistorted_channel
+    return undistorted_image
+
 
 def load_grayscale_image(image: np.ndarray) -> np.ndarray:
     gray_image = np.mean(image, axis=2).astype(np.uint8)
@@ -80,18 +151,22 @@ if __name__ == "__main__":
         os.makedirs(env.p4.output)  
     expected_camera_matrix = np.load(env.p4.expected_camera_matrix)
     expected_dist_coeffs = np.load(env.p4.expected_dist_coeffs)
+    image = utils.load_image(env.p3.chessboard_path)
+    original_image = image.copy()
+    grayscale_image = load_grayscale_image(image)
+
     # Part 4.a
+    image_height, image_width = grayscale_image.shape
+    field_of_view_radians = np.deg2rad(45)
+    focal_length = min(image_height, image_width) / (2 * np.tan(field_of_view_radians / 2))
     ideal_intrinsic_matrix = np.array([
-        [0, 0, 0],
-        [0, 0, 0],
-        [0, 0, 0]
+        [focal_length, 0, image_width / 2],
+        [0, focal_length, image_height / 2],
+        [0, 0, 1]
     ])
 
     # Part 4.b
     chessboard_size = (14, 9)  # (columns, rows)
-    
-    image = utils.load_image(env.p3.chessboard_path)
-    grayscale_image = load_grayscale_image(image)
     corners = find_chessboard_corners(grayscale_image, chessboard_size)
     corners = refine_corners(grayscale_image, corners)
     draw_corners(image, chessboard_size, corners)
