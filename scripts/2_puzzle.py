@@ -11,7 +11,7 @@ with install_import_hook(("src",), ("beartype", "beartype")):
 
 # Put the path to your puzzle here.
 DATASET_PATH = Path(
-    "PATH_TO_PUZZLE"
+    "data/Puzzle"
 )
 
 if __name__ == "__main__":

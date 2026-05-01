@@ -1,11 +1,13 @@
 from pathlib import Path
 import json
-from typing import Literal, TypedDict
+from typing import Literal, Optional, TypedDict
 
 from jaxtyping import Float
 from PIL import Image
 import torch
 from torch import Tensor
+
+CONSTRAINT_TOLERANCE = 1e-2
 
 
 class PuzzleDataset(TypedDict):
@@ -115,27 +117,27 @@ def _ortho_error(c2w: Float[Tensor, "batch 4 4"]) -> Tensor:
     )
 
 
-def is_matching_radius(c2w: Float[Tensor, "batch 4 4"], tolerance: float = 1e-2) -> bool:
+def is_matching_radius(c2w: Float[Tensor, "batch 4 4"], tolerance: float = CONSTRAINT_TOLERANCE) -> bool:
     """Return whether the camera radius constraint is satisfied."""
     return float(_radius_error(c2w)) < tolerance
 
 
-def is_matching_positive_y(c2w: Float[Tensor, "batch 4 4"], tolerance: float = 1e-4) -> bool:
+def is_matching_positive_y(c2w: Float[Tensor, "batch 4 4"], tolerance: float = CONSTRAINT_TOLERANCE) -> bool:
     """Return whether all camera centers lie in nonnegative world y."""
     return float(_positive_y_error(c2w)) < tolerance
 
 
-def is_matching_tangent_look(c2w: Float[Tensor, "batch 4 4"], tolerance: float = 1e-2) -> bool:
+def is_matching_tangent_look(c2w: Float[Tensor, "batch 4 4"], tolerance: float = CONSTRAINT_TOLERANCE) -> bool:
     """Return whether look vectors face the world origin."""
     return float(_tangent_error(c2w)) < tolerance
 
 
-def is_matching_upward_vector(c2w: Float[Tensor, "batch 4 4"], tolerance: float = 1e-4) -> bool:
+def is_matching_upward_vector(c2w: Float[Tensor, "batch 4 4"], tolerance: float = CONSTRAINT_TOLERANCE) -> bool:
     """Return whether camera up vectors point upward in world space."""
     return float(_upward_error(c2w)) < tolerance
 
 
-def is_matching_orthogonality(c2w: Float[Tensor, "batch 4 4"], tolerance: float = 5e-2) -> bool:
+def is_matching_orthogonality(c2w: Float[Tensor, "batch 4 4"], tolerance: float = CONSTRAINT_TOLERANCE) -> bool:
     """Return whether camera axes are approximately orthogonal."""
     return float(_ortho_error(c2w)) < tolerance
 
@@ -149,40 +151,33 @@ def _all_constraints_match(c2w: Float[Tensor, "batch 4 4"]) -> bool:
         and is_matching_upward_vector(c2w)
         and is_matching_orthogonality(c2w)
     )
+    
+    
+def finding_matching_axis_transformation(c2w_extrinsics: Float[Tensor, "batch 4 4"]) -> tuple[bool, Optional[Tensor]]:
+    """Find the matching axis transformation to openCV convention that satisfies all constraints for a given c2w 
+    extrinsics set in an unknown convention."""
+    conversion_matrix_candidates = _all_signed_permutation_mats(c2w_extrinsics.device)
+    for conversion_matrix in conversion_matrix_candidates:
+        c2w_transformed = c2w_extrinsics.clone()
+        c2w_transformed[:, :3, :3] = c2w_extrinsics[:, :3, :3] @ conversion_matrix.transpose(0, 1)
+        if _all_constraints_match(c2w_transformed):
+            return True, conversion_matrix
+    return False, None
 
 
 def infer_best_conversion_to_opencv(extrinsics: Float[Tensor, "batch 4 4"]) -> tuple[Literal["w2c", "c2w"], Tensor]:
-    """Find the source convention and axis mapping to OpenCV camera axes."""
-    device = extrinsics.device
-    conversion_matrix_candidates = _all_signed_permutation_mats(device)
-
-    def evaluate_source(
-        source_convention: Literal["c2w", "w2c"],
-        c2w_candidate_source: Float[Tensor, "batch 4 4"],
-    ) -> tuple[bool, Tensor]:
-        """Test all axis mappings for one assumed source convention."""
-        print(f"--- attempting to interpret as {source_convention} ---")
-        for conversion_matrix in conversion_matrix_candidates:
-            c2w_candidate = c2w_candidate_source.clone()
-            c2w_candidate[:, :3, :3] = c2w_candidate_source[:, :3, :3] @ conversion_matrix.transpose(0, 1)
-
-            if _all_constraints_match(c2w_candidate):
-                print(f"Found exact match while interpreting as {source_convention}.")
-                return True, conversion_matrix
-
-        print(f"No exact match while interpreting as {source_convention}.")
-        return False, torch.eye(3, dtype=torch.float32, device=device)
-
-    # Pass 1: treat metadata as c2w directly.
-    found_match, conversion_matrix = evaluate_source("c2w", extrinsics)
+    """Find the source convention and axis mapping to OpenCV camera axes.
+    The returned conversin matrix maps from c2w input convention to openCV convention."""
+    print("--- attempting to interpet inputs as c2w ---")
+    found_match, conversion_matrix = finding_matching_axis_transformation(extrinsics)
     if found_match:
+        print(f"Found exact match while interpreting as c2w.")
         return "c2w", conversion_matrix
-
-    # Pass 2: treat metadata as w2c, invert once, and evaluate as c2w.
-    found_match, conversion_matrix = evaluate_source("w2c", torch.linalg.inv(extrinsics))
+    print("--- attempting to interpret inputs as w2c ---")
+    found_match, conversion_matrix = finding_matching_axis_transformation(torch.linalg.inv(extrinsics))
     if found_match:
+        print(f"Found exact match while interpreting as w2c.")
         return "w2c", conversion_matrix
-
     raise ValueError("No exact axis/sign mapping matched all puzzle constraints.")
 
 
@@ -202,11 +197,11 @@ def convert_dataset(dataset: PuzzleDataset) -> PuzzleDataset:
     source_convention, conversion_matrix = infer_best_conversion_to_opencv(extrinsics)
 
     c2w_source = extrinsics if source_convention == "c2w" else torch.linalg.inv(extrinsics)
-    c2w = c2w_source.clone()
-    c2w[:, :3, :3] = c2w_source[:, :3, :3] @ conversion_matrix.transpose(0, 1)
+    c2w_transformed_to_opencv = c2w_source.clone()
+    c2w_transformed_to_opencv[:, :3, :3] = c2w_source[:, :3, :3] @ conversion_matrix.transpose(0, 1)
 
     return {
-        "extrinsics": c2w,
+        "extrinsics": c2w_transformed_to_opencv,
         "intrinsics": dataset["intrinsics"],
         "images": dataset["images"],
     }
