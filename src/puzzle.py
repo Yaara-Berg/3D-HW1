@@ -105,7 +105,7 @@ def _upward_error(c2w: Float[Tensor, "batch 4 4"]) -> Tensor:
     return torch.clamp(-up_directions[:, 1], min=0).mean()
 
 
-def _ortho_error(c2w: Float[Tensor, "batch 4 4"]) -> Tensor:
+def _orthogonality_error(c2w: Float[Tensor, "batch 4 4"]) -> Tensor:
     """Measure non-orthogonality of right, up, and look camera axes."""
     right_directions = c2w[:, :3, 0]
     up_directions = -c2w[:, :3, 1]
@@ -115,6 +115,12 @@ def _ortho_error(c2w: Float[Tensor, "batch 4 4"]) -> Tensor:
         + (right_directions * look_directions).sum(dim=-1).abs().mean()
         + (up_directions * look_directions).sum(dim=-1).abs().mean()
     )
+
+
+def _handedness_error(c2w: Float[Tensor, "batch 4 4"]) -> Tensor:
+    """Measure deviation from determinant +1 for rotation blocks."""
+    rotation_matrices = c2w[:, :3, :3]
+    return (torch.linalg.det(rotation_matrices) - 1.0).abs().mean()
 
 
 def is_matching_radius(c2w: Float[Tensor, "batch 4 4"], tolerance: float = CONSTRAINT_TOLERANCE) -> bool:
@@ -137,19 +143,19 @@ def is_matching_upward_vector(c2w: Float[Tensor, "batch 4 4"], tolerance: float 
     return float(_upward_error(c2w)) < tolerance
 
 
-def is_matching_orthogonality(c2w: Float[Tensor, "batch 4 4"], tolerance: float = CONSTRAINT_TOLERANCE) -> bool:
-    """Return whether camera axes are approximately orthogonal."""
-    return float(_ortho_error(c2w)) < tolerance
+def is_valid_rigid_rotation(c2w: Float[Tensor, "batch 4 4"], tolerance: float = CONSTRAINT_TOLERANCE) -> bool:
+    """Return whether camera axes form a valid rigid rotation matrix."""
+    return float(_orthogonality_error(c2w)) < tolerance and float(_handedness_error(c2w)) < tolerance
 
 
 def _all_constraints_match(c2w: Float[Tensor, "batch 4 4"]) -> bool:
     """Check whether all geometric puzzle constraints are satisfied."""
     return (
-        is_matching_radius(c2w)
+        is_valid_rigid_rotation(c2w)
+        and is_matching_radius(c2w)
         and is_matching_positive_y(c2w)
         and is_matching_tangent_look(c2w)
         and is_matching_upward_vector(c2w)
-        and is_matching_orthogonality(c2w)
     )
     
     
@@ -264,4 +270,13 @@ def explanation_of_problem_solving_process() -> str:
     We'll only grade you on whether you provide a descriptive answer, not on how you
     solved the puzzle (brute force, deduction, etc.).
     """
-    raise NotImplementedError("Not implemented")
+    return (
+        "I solved the puzzle by trying all possible signed axis permutations and checking "
+        "whether the resulting camera poses satisfy the known dataset constraints. I first "
+        "tested the metadata as camera-to-world extrinsics, then tested the inverse matrices "
+        "as the world-to-camera case. For each candidate, I checked that camera centers are "
+        "2 units from the origin, lie at nonnegative world y, look toward the world origin, "
+        "have upward-facing up vectors, and form valid rigid rotations. The candidate that "
+        "satisfied all of these checks gives the conversion into OpenCV-style camera-to-world "
+        "extrinsics."
+    )
