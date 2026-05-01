@@ -1,12 +1,13 @@
 import os
-import sys
 import env
-import src.utils.engine as engine
 
 import numpy as np
 from PIL import Image, ImageDraw
 
-import matplotlib.pyplot as plt
+try:
+    import matplotlib.pyplot as plt
+except ModuleNotFoundError:
+    plt = None
 
 def find_contours(binary_image: np.ndarray, foreground: int=1) -> np.ndarray:
     """
@@ -17,8 +18,22 @@ def find_contours(binary_image: np.ndarray, foreground: int=1) -> np.ndarray:
     Returns:
         A list of pixel coordinates that form the boundaries of the objects.
     """
-    # TODO: Implement this method!
-    raise NotImplementedError
+    foreground_mask = binary_image == foreground
+    padded_foreground_mask = np.pad(foreground_mask, pad_width=1, mode="constant", constant_values=False)
+
+    neighbor_masks = [
+        padded_foreground_mask[:-2, :-2],
+        padded_foreground_mask[:-2, 1:-1],
+        padded_foreground_mask[:-2, 2:],
+        padded_foreground_mask[1:-1, :-2],
+        padded_foreground_mask[1:-1, 2:],
+        padded_foreground_mask[2:, :-2],
+        padded_foreground_mask[2:, 1:-1],
+        padded_foreground_mask[2:, 2:],
+    ]
+    has_background_neighbor = np.logical_not(np.logical_and.reduce(neighbor_masks))
+    contour_mask = foreground_mask & has_background_neighbor
+    return np.argwhere(contour_mask)
 
 
 class ContourImage():
@@ -30,8 +45,8 @@ class ContourImage():
         """
         Convert the image to a binary image.
         """
-        # TODO: Implement this method!
-        raise NotImplementedError
+        grayscale_image = np.asarray(self.image.convert("L"))
+        self.binarized_image = (grayscale_image < threshold).astype(np.uint8)
 
     def show(self) -> None:
         self.to_PIL().show()
@@ -40,8 +55,29 @@ class ContourImage():
         """
         Fill the border of the binarized image with zeros.
         """
-        # TODO: Implement this method!
-        raise NotImplementedError
+        if self.binarized_image is None:
+            raise ValueError("Image must be binarized before filling the border.")
+
+        border_pixel_stack = []
+        image_height, image_width = self.binarized_image.shape
+        for column_index in range(image_width):
+            border_pixel_stack.append((0, column_index))
+            border_pixel_stack.append((image_height - 1, column_index))
+        for row_index in range(image_height):
+            border_pixel_stack.append((row_index, 0))
+            border_pixel_stack.append((row_index, image_width - 1))
+
+        while border_pixel_stack:
+            row_index, column_index = border_pixel_stack.pop()
+            if self.binarized_image[row_index, column_index] == 0:
+                continue
+
+            self.binarized_image[row_index, column_index] = 0
+            for row_offset, column_offset in ((-1, 0), (1, 0), (0, -1), (0, 1)):
+                neighbor_row = row_index + row_offset
+                neighbor_column = column_index + column_offset
+                if 0 <= neighbor_row < image_height and 0 <= neighbor_column < image_width:
+                    border_pixel_stack.append((neighbor_row, neighbor_column))
 
     def to_PIL(self) -> Image:
         color_array = np.stack([self.binarized_image]*3, axis=-1) * 255
@@ -82,6 +118,7 @@ if __name__ == "__main__":
 
     result_img = draw_corners(image, contours, color=(255, 0, 0), radius=5)
     result_img.save(env.p3.contours_path)
-    plt.imshow(result_img)
-    plt.title("Chessboard Contours")
-    plt.show()
+    if plt is not None:
+        plt.imshow(result_img)
+        plt.title("Chessboard Contours")
+        plt.show()
