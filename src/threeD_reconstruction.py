@@ -27,9 +27,10 @@ def recover_fundamental_matrix(kp1: List[cv2.KeyPoint],
     Returns:
         The fundamental matrix, the mask, and the points from good_matches in the first and second images
     """
-    # TODO: Implement this method!
-    # Hint: Use parse_matches defined below and cv2.findFundamentalMat
-    raise NotImplementedError
+    pts1, pts2 = parse_matches(kp1, kp2, good_matches)
+    F, mask = cv2.findFundamentalMat(pts1, pts2, cv2.FM_RANSAC,
+                                      ransacReprojThreshold=1.0, confidence=0.99)
+    return F, mask, pts1, pts2
 
 
 def compute_essential_matrix(camera_matrix: np.ndarray, 
@@ -42,9 +43,7 @@ def compute_essential_matrix(camera_matrix: np.ndarray,
     Returns:
         The essential matrix.
     """
-    # TODO: Implement this method!
-    # Hint: should be a one-liner
-    raise NotImplementedError
+    return camera_matrix.T @ fundamental_matrix @ camera_matrix
 
 
 def estimate_initial_RT(E: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
@@ -55,9 +54,20 @@ def estimate_initial_RT(E: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
     Returns:
         The rotation and translation matrices
     """
-    # TODO: Implement this method!
-    # Hint: Use the SVD decomposition of the essential matrix
-    raise NotImplementedError
+    U, S, Vt = np.linalg.svd(E)
+    W = np.array([[0, -1, 0], [1, 0, 0], [0, 0, 1]], dtype=np.float64)
+
+    R1 = U @ W @ Vt
+    R2 = U @ W.T @ Vt
+
+    # Ensure proper rotation matrices (det = +1)
+    if np.linalg.det(R1) < 0:
+        R1 = -R1
+    if np.linalg.det(R2) < 0:
+        R2 = -R2
+
+    t = U[:, 2]
+    return [R1, R1, R2, R2], [t, -t, t, -t]
 
 
 def find_best_RT(candidate_Rs: List[np.ndarray], 
@@ -75,9 +85,27 @@ def find_best_RT(candidate_Rs: List[np.ndarray],
     Returns:
         The best R and t that maximizes the number of inliers
     """
-    # TODO: Implement this method!
-    # Hint: Use triangulatePoints
-    raise NotImplementedError
+    P1 = get_identity_projection_matrix(camera_matrix)
+    best_count = -1
+    best_R, best_t = None, None
+
+    for R, t in zip(candidate_Rs, candidate_ts):
+        P2 = get_local_projection_matrix(camera_matrix, R, t)
+        pts4D = cv2.triangulatePoints(P1, P2,
+                                       inlier_pts1.astype(np.float32),
+                                       inlier_pts2.astype(np.float32))
+        pts3D = pts4D[:3] / pts4D[3]  # (3, N)
+
+        # Points must be in front of both cameras (positive Z depth)
+        depth1 = pts3D[2, :]
+        depth2 = (R @ pts3D + t.reshape(3, 1))[2, :]
+        count = np.sum((depth1 > 0) & (depth2 > 0))
+
+        if count > best_count:
+            best_count = count
+            best_R, best_t = R, t
+
+    return best_R, best_t
 
 
 def get_identity_projection_matrix(camera_matrix: np.ndarray) -> np.ndarray:
@@ -88,9 +116,7 @@ def get_identity_projection_matrix(camera_matrix: np.ndarray) -> np.ndarray:
     Returns:
         The identity projection matrix.
     """
-    # TODO: Implement this method!
-    # Hint: should be a one-liner
-    raise NotImplementedError
+    return camera_matrix @ np.hstack([np.eye(3), np.zeros((3, 1))])
 
 
 def get_local_projection_matrix(camera_matrix: np.ndarray, 
@@ -105,9 +131,7 @@ def get_local_projection_matrix(camera_matrix: np.ndarray,
     Returns:
         The local projection matrix.
     """
-    # TODO: Implement this method!
-    # Hint: should be a one-liner
-    raise NotImplementedError
+    return camera_matrix @ np.hstack([R, T.reshape(3, 1)])
 
 
 def calibrate_camera_from_chessboard(image_path: Path, 
