@@ -21,8 +21,31 @@ def lstsq_eight_point_alg(points1: np.array, points2: np.array) -> np.array:
     Returns:
         F - the fundamental matrix such that (points2)^T * F * points1 = 0
     '''
-    # TODO: Implement this method!
-    raise NotImplementedError
+    N = points1.shape[0]
+    x1, y1 = points1[:, 0], points1[:, 1]
+    x2, y2 = points2[:, 0], points2[:, 1]
+
+    # Build (N, 9) design matrix from the constraint p2^T F p1 = 0
+    A = np.column_stack([
+        x1*x2, y1*x2, x2,
+        x1*y2, y1*y2, y2,
+        x1,    y1,    np.ones(N)
+    ])
+
+    # Solve Af = 0: f is the right singular vector for the smallest singular value
+    _, _, Vt = np.linalg.svd(A)
+    F = Vt[-1].reshape(3, 3)
+
+    # Enforce rank-2 by zeroing the smallest singular value
+    U, S, Vt = np.linalg.svd(F)
+    S[2] = 0
+    F = U @ np.diag(S) @ Vt
+
+    # Canonical sign: make largest-magnitude entry positive
+    if F[np.unravel_index(np.argmax(np.abs(F)), F.shape)] < 0:
+        F = -F
+
+    return F
 
 
 def normalized_eight_point_alg(points1: np.array, points2: np.array) -> np.array:
@@ -39,8 +62,33 @@ def normalized_eight_point_alg(points1: np.array, points2: np.array) -> np.array
     Please see lecture notes and slides to see how the normalized eight
     point algorithm works
     '''
-    # TODO: Implement this method!
-    raise NotImplementedError
+    def build_normalization_transform(pts):
+        """Return (T, normalized_pts) where T scales so mean-sq-dist from centroid = 2."""
+        xy = pts[:, :2]
+        centroid = xy.mean(axis=0)
+        shifted = xy - centroid
+        mean_sq_dist = np.mean(np.sum(shifted ** 2, axis=1))
+        scale = np.sqrt(2.0 / mean_sq_dist)
+        T = np.array([
+            [scale,     0, -scale * centroid[0]],
+            [0,     scale, -scale * centroid[1]],
+            [0,         0,                    1],
+        ], dtype=np.float64)
+        return T, (T @ pts.T).T
+
+    T1, n_pts1 = build_normalization_transform(points1)
+    T2, n_pts2 = build_normalization_transform(points2)
+
+    F_norm = lstsq_eight_point_alg(n_pts1, n_pts2)
+
+    # Denormalize: F = T2^T @ F_norm @ T1
+    F = T2.T @ F_norm @ T1
+
+    # Canonical sign
+    if F[np.unravel_index(np.argmax(np.abs(F)), F.shape)] < 0:
+        F = -F
+
+    return F
 
 def compute_epipolar_lines(points: np.array, F: np.array) -> np.array:
     """
@@ -52,8 +100,12 @@ def compute_epipolar_lines(points: np.array, F: np.array) -> np.array:
     Returns:
         lines - the epipolar lines in homogenous coordinates
     """
-    # TODO: Implement this method!
-    raise NotImplementedError
+    # l = F @ p for each point p; lines_h[i] = [a, b, c] for ax + by + c = 0
+    lines_h = (F @ points.T).T  # (N, 3)
+    a, b, c = lines_h[:, 0], lines_h[:, 1], lines_h[:, 2]
+    m = -a / b
+    b_intercept = -c / b
+    return np.column_stack([m, b_intercept])
 
 
 def show_epipolar_imgs(img1: np.ndarray, 
