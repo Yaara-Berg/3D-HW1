@@ -30,9 +30,12 @@ def compute_epipole(points1: np.array,
     Returns:
         epipole - the homogenous coordinates [x y 1] of the epipole in the image
     '''
-    # TODO: Implement this method!
-    # Hint: p'T * F * p = 0
-    raise NotImplementedError
+    # The epipole e satisfies F @ e = 0 — it's the null space of F.
+    # F is rank-2, so the last right singular vector is the null vector.
+    _, _, Vt = np.linalg.svd(F)
+    e = Vt[-1]
+    e = e / e[2]   # normalize so last coordinate = 1
+    return e
     
 
 def compute_matching_homographies(e2: np.array, 
@@ -53,8 +56,27 @@ def compute_matching_homographies(e2: np.array,
         H1 - the homography associated with the first image
         H2 - the homography associated with the second image
     '''
-    # TODO: Implement this method!
-    raise NotImplementedError
+    h, w = im2.shape[:2]
+
+    # cv2.stereoRectifyUncalibrated computes the optimal uncalibrated rectifying
+    # homographies directly from point correspondences and F.
+    _, H1_raw, H2 = cv2.stereoRectifyUncalibrated(
+        points1[:, :2].astype(np.float64),
+        points2[:, :2].astype(np.float64),
+        F, (w, h)
+    )
+    H2 = H2.astype(np.float64)
+    H1_raw = H1_raw.astype(np.float64)
+
+    # H_A = H2 @ [e2]× @ F carries the normalization scale we need.
+    e2_cross = np.array([[    0, -e2[2],  e2[1]],
+                         [ e2[2],     0, -e2[0]],
+                         [-e2[1],  e2[0],     0]], dtype=np.float64)
+    H_A = H2 @ e2_cross @ F
+
+    # Rescale H1 so its [2,2] entry matches H_A's (same projective transform, different scale).
+    H1 = H1_raw * (H_A[2, 2] / H1_raw[2, 2])
+    return H1, H2
 
 
 def compute_rectified_image(im: np.array, 
@@ -68,8 +90,46 @@ def compute_rectified_image(im: np.array,
         new_image - a new image matrix after applying the homography
         offset - the offest in the image.
     '''
-    # TODO: Implement this method!
-    raise NotImplementedError
+    from scipy.ndimage import map_coordinates
+
+    h, w = im.shape[:2]
+
+    # Warp the four corners to find the output canvas bounds
+    corners = np.array([[0, 0, 1], [w-1, 0, 1], [0, h-1, 1], [w-1, h-1, 1]], dtype=np.float64)
+    warped = H @ corners.T
+    warped = warped / warped[2, :]
+
+    min_x = int(np.floor(warped[0].min()))
+    min_y = int(np.floor(warped[1].min()))
+    max_x = int(np.ceil(warped[0].max()))
+    max_y = int(np.ceil(warped[1].max()))
+    new_w = max_x - min_x + 1
+    new_h = max_y - min_y + 1
+
+    # Build output pixel grid shifted by offset
+    xs, ys = np.meshgrid(np.arange(new_w) + min_x, np.arange(new_h) + min_y)
+    out_pts = np.stack([xs.ravel(), ys.ravel(), np.ones(new_w * new_h)], axis=0)
+
+    # Map output pixels back to source via inverse H
+    H_inv = np.linalg.inv(H)
+    src = H_inv @ out_pts
+    src = src / src[2:3, :]
+    src_x = src[0].reshape(new_h, new_w)
+    src_y = src[1].reshape(new_h, new_w)
+
+    # Sample source image with bilinear interpolation
+    if im.ndim == 3:
+        channels = [
+            map_coordinates(im[:, :, c].astype(np.float64), [src_y, src_x],
+                            order=1, mode='constant', cval=0)
+            for c in range(im.shape[2])
+        ]
+        new_image = np.stack(channels, axis=2).astype(im.dtype)
+    else:
+        new_image = map_coordinates(im.astype(np.float64), [src_y, src_x],
+                                    order=1, mode='constant', cval=0).astype(im.dtype)
+
+    return new_image, (min_x, min_y)
 
 
 def find_matches(img1: np.array, img2: np.array) -> tuple:
@@ -83,8 +143,17 @@ def find_matches(img1: np.array, img2: np.array) -> tuple:
         kp2 - the keypoints of the second image
         matches - the matches between the keypoints
     """
-    # TODO: Implement this method!
-    raise NotImplementedError
+    sift = cv2.SIFT_create()
+    kp1, desc1 = sift.detectAndCompute(img1, None)
+    kp2, desc2 = sift.detectAndCompute(img2, None)
+
+    index_params = dict(algorithm=1, trees=5)  # FLANN_INDEX_KDTREE
+    search_params = dict(checks=50)
+    flann = cv2.FlannBasedMatcher(index_params, search_params)
+    matches = flann.knnMatch(desc1, desc2, k=2)
+
+    good_matches = [m for m, n in matches if m.distance < 0.75 * n.distance]
+    return kp1, kp2, good_matches
 
 
 def show_matches(img1: np.array, 
