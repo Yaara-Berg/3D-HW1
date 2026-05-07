@@ -57,25 +57,51 @@ def compute_matching_homographies(e2: np.array,
         H2 - the homography associated with the second image
     '''
     h, w = im2.shape[:2]
+    cx, cy = (w - 1) / 2.0, (h - 1) / 2.0
 
-    # cv2.stereoRectifyUncalibrated computes the optimal uncalibrated rectifying
-    # homographies directly from point correspondences and F.
-    _, H1_raw, H2 = cv2.stereoRectifyUncalibrated(
-        points1[:, :2].astype(np.float64),
-        points2[:, :2].astype(np.float64),
-        F, (w, h)
-    )
-    H2 = H2.astype(np.float64)
-    H1_raw = H1_raw.astype(np.float64)
+    # Step 1: Build H2 that maps e2 to the point at infinity on the x-axis.
+    if np.abs(e2[2]) > 1e-9: # Check if e2 is already at infinity 
+        e2_euc = e2 / e2[2]  # convert to [x, y, 1] form
+        ex = e2_euc[0] - cx  # the x of e2 relative to the image center
+        ey = e2_euc[1] - cy  # the y of e2 relative to the image center
+        d = np.sqrt(ex**2 + ey**2)  # distance from e2 to the image center
+        
+        # Rotate e2 onto the positive x-axis
+        R = np.array([[ ex/d, ey/d, 0],
+                      [-ey/d, ex/d, 0],
+                      [    0,    0, 1]], dtype=np.float64)
+        
+        # Projective map: sends (d, 0, 1) to infinity (1, 0, 0)
+        G = np.array([[1,    0, 0],
+                      [0,    1, 0],
+                      [-1/d, 0, 1]], dtype=np.float64)
+        
+        H2 = G @ R @ T
+    else:
+        H2 = np.eye(3)
 
-    # H_A = H2 @ [e2]× @ F carries the normalization scale we need.
+    # Step 2: Build H1 = Ha @ M where M = H2 @ [e2]_x @ F.
+    # M transfers image-1 points into the rectified frame consistent with H2.
     e2_cross = np.array([[    0, -e2[2],  e2[1]],
                          [ e2[2],     0, -e2[0]],
                          [-e2[1],  e2[0],     0]], dtype=np.float64)
-    H_A = H2 @ e2_cross @ F
+    M = H2 @ e2_cross @ F
 
-    # Rescale H1 so its [2,2] entry matches H_A's (same projective transform, different scale).
-    H1 = H1_raw * (H_A[2, 2] / H1_raw[2, 2])
+    # Apply M to points1 and H2 to points2 (homogeneous, shape 3xN).
+    p1_m  = M  @ points1.T;  p1_m  /= p1_m[2:3, :]
+    p2_h2 = H2 @ points2.T;  p2_h2 /= p2_h2[2:3, :]
+
+    # Find affine correction Ha = [[a,b,c],[0,1,0],[0,0,1]] via least squares
+    # such that a*x + b*y + c ≈ x' (matches x-coordinates of corresponding points).
+    A_mat = np.stack([p1_m[0], p1_m[1], np.ones(points1.shape[0])], axis=1)
+    abc, _, _, _ = np.linalg.lstsq(A_mat, p2_h2[0], rcond=None)
+    a, b, c = abc
+
+    Ha = np.array([[a, b, c],
+                   [0, 1, 0],
+                   [0, 0, 1]], dtype=np.float64)
+
+    H1 = Ha @ M
     return H1, H2
 
 
