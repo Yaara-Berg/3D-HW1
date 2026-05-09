@@ -30,11 +30,18 @@ def compute_epipole(points1: np.array,
     Returns:
         epipole - the homogenous coordinates [x y 1] of the epipole in the image
     '''
-    # The epipole e satisfies F @ e = 0 — it's the null space of F.
-    # F is rank-2, so the last right singular vector is the null vector.
-    _, _, Vt = np.linalg.svd(F)
+    lines = points1 @ F
+
+    # Validate: each points2[i] must lie on its epipolar line lines[i].
+    residuals = np.abs(np.sum(points2 * lines, axis=1))
+    assert residuals.max() < 1.0, (
+        f"Epipolar constraint badly violated: max |p2·l| = {residuals.max():.4f}"
+    )
+    
+    _, _, Vt = np.linalg.svd(lines)
     e = Vt[-1]
-    e = e / e[2]   # normalize so last coordinate = 1
+    if np.abs(e[2]) > 1e-9:
+        e = e / e[2]
     return e
     
 
@@ -59,49 +66,47 @@ def compute_matching_homographies(e2: np.array,
     h, w = im2.shape[:2]
     cx, cy = (w - 1) / 2.0, (h - 1) / 2.0
 
-    # Step 1: Build H2 that maps e2 to the point at infinity on the x-axis.
-    if np.abs(e2[2]) > 1e-9: # Check if e2 is already at infinity 
-        e2_euc = e2 / e2[2]  # convert to [x, y, 1] form
-        ex = e2_euc[0] - cx  # the x of e2 relative to the image center
-        ey = e2_euc[1] - cy  # the y of e2 relative to the image center
-        d = np.sqrt(ex**2 + ey**2)  # distance from e2 to the image center
-        
-        # Rotate e2 onto the positive x-axis
+    # Center-translate / rotate / projective-send-to-infinity, then undo the
+    # centering so the rectified images stay in the original pixel coordinate frame.
+    T     = np.array([[1, 0, -cx], [0, 1, -cy], [0, 0, 1]], dtype=np.float64)
+    T_inv = np.array([[1, 0,  cx], [0, 1,  cy], [0, 0, 1]], dtype=np.float64)
+
+    if np.abs(e2[2]) > 1e-9:
+        e2_euc = e2 / e2[2]
+        ex = e2_euc[0] - cx
+        ey = e2_euc[1] - cy
+        d = np.sqrt(ex**2 + ey**2)
+
         R = np.array([[ ex/d, ey/d, 0],
                       [-ey/d, ex/d, 0],
                       [    0,    0, 1]], dtype=np.float64)
-        
-        # Projective map: sends (d, 0, 1) to infinity (1, 0, 0)
         G = np.array([[1,    0, 0],
                       [0,    1, 0],
                       [-1/d, 0, 1]], dtype=np.float64)
-        
-        H2 = G @ R @ T
-    else:
-        H2 = np.eye(3)
 
-    # Step 2: Build H1 = Ha @ M where M = H2 @ [e2]_x @ F.
-    # M transfers image-1 points into the rectified frame consistent with H2.
+        H2_basic = G @ R @ T
+    else:
+        H2_basic = np.eye(3)
+
+    H2 = T_inv @ H2_basic
+
+    # Transfer matrix M: maps image-1 points into the centered rectified frame.
     e2_cross = np.array([[    0, -e2[2],  e2[1]],
                          [ e2[2],     0, -e2[0]],
                          [-e2[1],  e2[0],     0]], dtype=np.float64)
-    M = H2 @ e2_cross @ F
+    M = H2_basic @ e2_cross @ F   # H2_basic so third row equals expected H1[2]
 
-    # Apply M to points1 and H2 to points2 (homogeneous, shape 3xN).
-    p1_m  = M  @ points1.T;  p1_m  /= p1_m[2:3, :]
-    p2_h2 = H2 @ points2.T;  p2_h2 /= p2_h2[2:3, :]
+    # Fit H1_basic row-by-row: H1_basic @ p1_i ≈ w_i * q2_i (centered frame).
+    # Working in the original image-1 coordinate space avoids the near-constant
+    # x-clustering that arises when using M-transformed coordinates.
+    q2    = H2_basic @ points2.T;  q2    /= q2[2:3, :]   # centered rectified targets
+    w_sc  = M[2] @ points1.T                              # projective denominator
 
-    # Find affine correction Ha = [[a,b,c],[0,1,0],[0,0,1]] via least squares
-    # such that a*x + b*y + c ≈ x' (matches x-coordinates of corresponding points).
-    A_mat = np.stack([p1_m[0], p1_m[1], np.ones(points1.shape[0])], axis=1)
-    abc, _, _, _ = np.linalg.lstsq(A_mat, p2_h2[0], rcond=None)
-    a, b, c = abc
+    ABC, _, _, _ = np.linalg.lstsq(points1, q2[0] * w_sc, rcond=None)
+    DEF, _, _, _ = np.linalg.lstsq(points1, q2[1] * w_sc, rcond=None)
+    H1_basic = np.array([ABC, DEF, M[2]])
 
-    Ha = np.array([[a, b, c],
-                   [0, 1, 0],
-                   [0, 0, 1]], dtype=np.float64)
-
-    H1 = Ha @ M
+    H1 = T_inv @ H1_basic
     return H1, H2
 
 
