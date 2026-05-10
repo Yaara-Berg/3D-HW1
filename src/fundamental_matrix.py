@@ -26,14 +26,14 @@ def lstsq_eight_point_alg(points1: np.array, points2: np.array) -> np.array:
     x2, y2 = points2[:, 0], points2[:, 1]
 
     # Build (N, 9) design matrix from the constraint p2^T F p1 = 0
-    A = np.column_stack([
+    W = np.column_stack([
         x1*x2, y1*x2, x2,
         x1*y2, y1*y2, y2,
         x1,    y1,    np.ones(N)
     ])
 
-    # Solve Af = 0: f is the right singular vector for the smallest singular value
-    _, _, Vt = np.linalg.svd(A)
+    # Solve Wf = 0: f is the right singular vector for the smallest singular value
+    _, _, Vt = np.linalg.svd(W)
     F = Vt[-1].reshape(3, 3)
 
     # Enforce rank-2 by zeroing the smallest singular value
