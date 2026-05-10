@@ -67,7 +67,7 @@ def estimate_initial_RT(E: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
         R2 = -R2
 
     t = U[:, 2]
-    return [R1, R1, R2, R2], [t, -t, t, -t]
+    return np.array([R1, R2]), np.array([t, -t])
 
 
 def find_best_RT(candidate_Rs: List[np.ndarray], 
@@ -89,21 +89,22 @@ def find_best_RT(candidate_Rs: List[np.ndarray],
     best_count = -1
     best_R, best_t = None, None
 
-    for R, t in zip(candidate_Rs, candidate_ts):
-        P2 = get_local_projection_matrix(camera_matrix, R, t)
-        pts4D = cv2.triangulatePoints(P1, P2,
-                                       inlier_pts1.astype(np.float32),
-                                       inlier_pts2.astype(np.float32))
-        pts3D = pts4D[:3] / pts4D[3]  # (3, N)
+    for R in candidate_Rs:
+        for t in candidate_ts:
+            P2 = get_local_projection_matrix(camera_matrix, R, t)
+            pts4D = cv2.triangulatePoints(P1, P2,
+                                           inlier_pts1.astype(np.float32),
+                                           inlier_pts2.astype(np.float32))
+            pts3D = pts4D[:3] / pts4D[3]  # (3, N)
 
-        # Points must be in front of both cameras (positive Z depth)
-        depth1 = pts3D[2, :]
-        depth2 = (R @ pts3D + t.reshape(3, 1))[2, :]
-        count = np.sum((depth1 > 0) & (depth2 > 0))
+            # Points must be in front of both cameras (positive Z depth)
+            depth1 = pts3D[2, :]
+            depth2 = (R @ pts3D + t.reshape(3, 1))[2, :]
+            count = np.sum((depth1 > 0) & (depth2 > 0))
 
-        if count > best_count:
-            best_count = count
-            best_R, best_t = R, t
+            if count > best_count:
+                best_count = count
+                best_R, best_t = R, t
 
     return best_R, best_t
 
