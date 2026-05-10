@@ -1,5 +1,7 @@
 import os
 import sys
+
+from matplotlib import image
 import env
 import src.utils.utils as utils
 
@@ -30,6 +32,11 @@ def compute_epipole(points1: np.array,
     Returns:
         epipole - the homogenous coordinates [x y 1] of the epipole in the image
     '''
+    # The F matrix satisfies p'Fp = 0 for all points p on the epipolar line of p'.
+    # So if we take p in the null space of F, it will be on the epipolar line of p' for any p'.
+    # Therefore the epipole e is the null space of F.
+    # Bc F is rank 2 (and 3x3), the last right singular vector is the null vector.
+
     lines = points1 @ F
 
     # Validate: each points2[i] must lie on its epipolar line lines[i].
